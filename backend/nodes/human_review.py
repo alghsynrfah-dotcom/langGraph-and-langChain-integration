@@ -27,7 +27,7 @@ def human_review(state: ResearchState) -> dict:
 
     if human_decision == "approve":
         return {
-            "human_review": "approve",
+            "human_review": "approved",
             "approved_articles": selected_articles,
             "current_node": "human_review",
             "workflow_status": "human_review_approved",
@@ -36,7 +36,7 @@ def human_review(state: ResearchState) -> dict:
 
     if human_decision == "reject":
         return {
-            "human_review": "reject",
+            "human_review": "rejected",
             "approved_articles": [],
             "current_node": "human_review",
             "workflow_status": "human_review_rejected",

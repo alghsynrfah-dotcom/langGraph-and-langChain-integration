@@ -2,6 +2,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from backend.graph.state import ResearchState
+
+from backend.nodes.agent_node import agent_node
 from backend.nodes.article_processing import article_processing
 from backend.nodes.article_selection import article_selection
 from backend.nodes.branch_failure import branch_failure
@@ -9,25 +11,41 @@ from backend.nodes.human_review import human_review
 from backend.nodes.quality_check import quality_check
 from backend.nodes.report_generation import report_generation
 from backend.nodes.research_planning import research_planning
-from backend.nodes.search import search_news
 from backend.nodes.summarization import summarization
 from backend.nodes.validation import validate_results
 from backend.nodes.state_validation import validate_state
 
 
-def research_planning_router(state: ResearchState) -> str:
-    """
-    Decide where to go after Research Planning.
+# ============================================================
+# ROUTERS
+# ============================================================
 
-    Valid input -> Search
-    Invalid input -> End
-    Unexpected status -> Branch Failure
-    """
 
-    status = state.get("workflow_status", "")
+def state_validation_router(state: ResearchState):
+
+    status = state.get(
+        "workflow_status",
+        "",
+    )
+
+    if status == "state_valid":
+        return "research_planning"
+
+    if status == "state_invalid":
+        return "branch_failure"
+
+    return "branch_failure"
+
+
+def research_planning_router(state: ResearchState):
+
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
     if status == "planning_completed":
-        return "search"
+        return "agent"
 
     if status == "invalid_input":
         return END
@@ -35,23 +53,34 @@ def research_planning_router(state: ResearchState) -> str:
     return "branch_failure"
 
 
-def validation_router(state: ResearchState) -> str:
-    """
-    Decide where to go after validation.
+def agent_router(state: ResearchState):
 
-    Valid results -> Article Selection
-    Invalid results with retries available -> Search
-    Retry limit reached -> End
-    Unexpected status -> Branch Failure
-    """
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
-    status = state.get("workflow_status", "")
+    if status == "agent_completed":
+        return "validation"
+
+    if status == "agent_failed":
+        return END
+
+    return "branch_failure"
+
+
+def validation_router(state: ResearchState):
+
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
     if status == "validation_completed":
         return "article_selection"
 
     if status == "validation_failed_retry":
-        return "search"
+        return "agent"
 
     if status == "validation_failed":
         return END
@@ -59,16 +88,12 @@ def validation_router(state: ResearchState) -> str:
     return "branch_failure"
 
 
-def article_selection_router(state: ResearchState) -> str:
-    """
-    Decide where to go after Article Selection.
+def article_selection_router(state: ResearchState):
 
-    Successful selection -> Human Review
-    LLM failure -> End
-    Unexpected status -> Branch Failure
-    """
-
-    status = state.get("workflow_status", "")
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
     if status == "article_selection_completed":
         return "human_review"
@@ -78,41 +103,24 @@ def article_selection_router(state: ResearchState) -> str:
 
     return "branch_failure"
 
+def human_review_router(state: ResearchState):
+    decision = state.get("human_review", "")
 
-def human_review_router(state: ResearchState) -> str:
-    """
-    Decide where to go after Human Review.
-
-    Approved -> Article Processing
-    Rejected -> Article Selection
-    Invalid decision -> End
-    Unexpected status -> Branch Failure
-    """
-
-    status = state.get("workflow_status", "")
-
-    if status == "human_review_approved":
+    if decision == "approved":
         return "article_processing"
 
-    if status == "human_review_rejected":
+    if decision == "rejected":
         return "article_selection"
-
-    if status == "human_review_failed":
-        return END
 
     return "branch_failure"
 
 
-def summarization_router(state: ResearchState) -> str:
-    """
-    Decide where to go after Summarization.
+def summarization_router(state: ResearchState):
 
-    Successful summarization -> Report Generation
-    LLM failure -> End
-    Unexpected status -> Branch Failure
-    """
-
-    status = state.get("workflow_status", "")
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
     if status == "summarization_completed":
         return "report_generation"
@@ -123,18 +131,14 @@ def summarization_router(state: ResearchState) -> str:
     return "branch_failure"
 
 
-def report_generation_router(state: ResearchState) -> str:
-    """
-    Decide where to go after Report Generation.
+def report_generation_router(state: ResearchState):
 
-    Successful report generation -> Quality Check
-    LLM failure -> End
-    Unexpected status -> Branch Failure
-    """
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
-    status = state.get("workflow_status", "")
-
-    if status == "report_generation_completed":
+    if status == "report_generated":
         return "quality_check"
 
     if status == "report_generation_failed":
@@ -143,17 +147,12 @@ def report_generation_router(state: ResearchState) -> str:
     return "branch_failure"
 
 
-def quality_check_router(state: ResearchState) -> str:
-    """
-    Decide where to go after Quality Check.
+def quality_check_router(state: ResearchState):
 
-    Passed -> End
-    Failed with retries available -> Report Generation
-    Retry limit reached -> End
-    Unexpected status -> Branch Failure
-    """
-
-    status = state.get("workflow_status", "")
+    status = state.get(
+        "workflow_status",
+        "",
+    )
 
     if status == "quality_check_passed":
         return END
@@ -167,45 +166,89 @@ def quality_check_router(state: ResearchState) -> str:
     return "branch_failure"
 
 
+# ============================================================
+# GRAPH
+# ============================================================
+
+
 builder = StateGraph(ResearchState)
 
 
-# Add nodes
-builder.add_node("research_planning", research_planning)
-builder.add_node("search", search_news)
-builder.add_node("validation", validate_results)
-builder.add_node("article_selection", article_selection)
-builder.add_node("human_review", human_review)
-builder.add_node("article_processing", article_processing)
-builder.add_node("summarization", summarization)
-builder.add_node("report_generation", report_generation)
-builder.add_node("quality_check", quality_check)
-builder.add_node("branch_failure", branch_failure)
-builder.add_node("state_validation", validate_state)
+# ------------------------------------------------------------
+# Nodes
+# ------------------------------------------------------------
+
+builder.add_node(
+    "state_validation",
+    validate_state,
+)
+
+builder.add_node(
+    "research_planning",
+    research_planning,
+)
+
+builder.add_node(
+    "agent",
+    agent_node,
+)
+
+builder.add_node(
+    "validation",
+    validate_results,
+)
+
+builder.add_node(
+    "article_selection",
+    article_selection,
+)
+
+builder.add_node(
+    "human_review",
+    human_review,
+)
+
+builder.add_node(
+    "article_processing",
+    article_processing,
+)
+
+builder.add_node(
+    "summarization",
+    summarization,
+)
+
+builder.add_node(
+    "report_generation",
+    report_generation,
+)
+
+builder.add_node(
+    "quality_check",
+    quality_check,
+)
+
+builder.add_node(
+    "branch_failure",
+    branch_failure,
+)
 
 
-# START -> Research Planning
-builder.add_edge(START, "state_validation")
+# ============================================================
+# EDGES
+# ============================================================
 
 
-def state_validation_router(state: ResearchState) -> str:
-    """
-    Decide whether the initial State is valid.
+# START
+builder.add_edge(
+    START,
+    "state_validation",
+)
 
-    Valid State -> Research Planning
-    Invalid State -> Branch Failure
-    """
 
-    status = state.get("workflow_status", "")
-
-    if status == "state_valid":
-        return "research_planning"
-
-    if status == "invalid_state":
-        return "branch_failure"
-
-    return "branch_failure"
-
+# ------------------------------------------------------------
+# State Validation
+# ------------------------------------------------------------
 
 builder.add_conditional_edges(
     "state_validation",
@@ -217,36 +260,56 @@ builder.add_conditional_edges(
 )
 
 
-# Research Planning branching
+# ------------------------------------------------------------
+# Research Planning
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "research_planning",
     research_planning_router,
     {
-        "search": "search",
+        "agent": "agent",
         "branch_failure": "branch_failure",
         END: END,
     },
 )
 
 
-# Search -> Validation
-builder.add_edge("search", "validation")
+# ------------------------------------------------------------
+# LangChain Agent
+# ------------------------------------------------------------
+
+builder.add_conditional_edges(
+    "agent",
+    agent_router,
+    {
+        "validation": "validation",
+        "branch_failure": "branch_failure",
+        END: END,
+    },
+)
 
 
-# Validation branching
+# ------------------------------------------------------------
+# Validation
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "validation",
     validation_router,
     {
         "article_selection": "article_selection",
-        "search": "search",
+        "agent": "agent",
         "branch_failure": "branch_failure",
         END: END,
     },
 )
 
 
-# Article Selection branching
+# ------------------------------------------------------------
+# Article Selection
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "article_selection",
     article_selection_router,
@@ -258,7 +321,10 @@ builder.add_conditional_edges(
 )
 
 
-# Human Review branching
+# ------------------------------------------------------------
+# Human Review
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "human_review",
     human_review_router,
@@ -266,16 +332,24 @@ builder.add_conditional_edges(
         "article_processing": "article_processing",
         "article_selection": "article_selection",
         "branch_failure": "branch_failure",
-        END: END,
     },
 )
 
 
-# Article Processing -> Summarization
-builder.add_edge("article_processing", "summarization")
+# ------------------------------------------------------------
+# Article Processing
+# ------------------------------------------------------------
+
+builder.add_edge(
+    "article_processing",
+    "summarization",
+)
 
 
-# Summarization branching
+# ------------------------------------------------------------
+# Summarization
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "summarization",
     summarization_router,
@@ -287,7 +361,10 @@ builder.add_conditional_edges(
 )
 
 
-# Report Generation branching
+# ------------------------------------------------------------
+# Report Generation
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "report_generation",
     report_generation_router,
@@ -299,7 +376,10 @@ builder.add_conditional_edges(
 )
 
 
-# Quality Check branching
+# ------------------------------------------------------------
+# Quality Check
+# ------------------------------------------------------------
+
 builder.add_conditional_edges(
     "quality_check",
     quality_check_router,
@@ -311,11 +391,23 @@ builder.add_conditional_edges(
 )
 
 
-# Branch Failure -> End
-builder.add_edge("branch_failure", END)
+# ------------------------------------------------------------
+# Failure Branch
+# ------------------------------------------------------------
+
+builder.add_edge(
+    "branch_failure",
+    END,
+)
 
 
-# Checkpointer for interrupt/resume
+# ============================================================
+# CHECKPOINT
+# ============================================================
+
 checkpointer = InMemorySaver()
 
-graph = builder.compile(checkpointer=checkpointer)
+
+graph = builder.compile(
+    checkpointer=checkpointer,
+)

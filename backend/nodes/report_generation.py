@@ -114,7 +114,7 @@ Return only the final research report.
         return {
             "final_report": final_report,
             "current_node": "report_generation",
-            "workflow_status": "report_generation_completed",
+            "workflow_status": "report_generated",
             "error": "",
         }
 

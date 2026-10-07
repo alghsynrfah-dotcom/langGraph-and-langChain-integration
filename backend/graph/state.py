@@ -7,6 +7,24 @@ class ResearchState(TypedDict):
 
     research_plan: str
 
+    # --------------------------------------------------
+    # Agent State
+    # --------------------------------------------------
+
+    agent_answer: str
+
+    agent_steps: int
+
+    tools_used: list
+
+    sources: list
+
+    agent_error: str
+
+    # --------------------------------------------------
+    # Workflow State
+    # --------------------------------------------------
+
     search_results: list
 
     selected_articles: list
