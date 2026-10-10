@@ -1,3 +1,4 @@
+
 import time
 import uuid
 
@@ -63,31 +64,21 @@ def get_state_from_graph(config: dict) -> dict:
 
 
 def is_human_review_pending(config: dict) -> bool:
-    """
-    Check whether LangGraph is currently paused at the human_review
-    interrupt and waiting for a decision.
-    """
+    """Check whether the graph is paused for human review."""
     try:
         snapshot = graph.get_state(config)
-
-        # If LangGraph has a next node, check whether human_review
-        # is the node waiting to execute.
         next_nodes = getattr(snapshot, "next", ()) or ()
 
         if "human_review" in next_nodes:
             return True
 
-        # Some LangGraph versions expose pending tasks.
         tasks = getattr(snapshot, "tasks", ()) or ()
-
         for task in tasks:
             interrupts = getattr(task, "interrupts", ()) or ()
-
             if interrupts:
                 return True
 
         return False
-
     except Exception:
         return False
 
@@ -98,17 +89,19 @@ def build_response(
     execution_time: float,
     human_review_required: bool = False,
 ) -> dict:
-
     completed_steps = []
 
     if state.get("research_plan"):
         completed_steps.append("research_planning")
 
+    # Agent execution produces search_results.
     if state.get("search_results"):
-        completed_steps.append("search")
+        completed_steps.append("agent")
 
+    # Validation may have succeeded even if the status later changed.
     if (
         state.get("validation_errors")
+        or state.get("selected_articles")
         or state.get("workflow_status") in {
             "validation_completed",
             "validation_failed_retry",
@@ -163,40 +156,24 @@ def root():
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok"
-    }
+    return {"status": "ok"}
 
 
 @app.post("/research")
 def start_research(request: ResearchRequest):
-
     topic = request.topic.strip()
     thread_id = request.thread_id or str(uuid.uuid4())
 
-    config = {
-        "configurable": {
-            "thread_id": thread_id
-        }
-    }
-
+    config = {"configurable": {"thread_id": thread_id}}
     initial_state = create_initial_state(topic)
-
     start_time = time.perf_counter()
 
     try:
-        result = graph.invoke(
-            initial_state,
-            config=config,
-        )
-
+        result = graph.invoke(initial_state, config=config)
         execution_time = time.perf_counter() - start_time
-
         state = get_state_from_graph(config)
-
         human_review_required = is_human_review_pending(config)
 
-        # Also support LangGraph's direct interrupt result.
         if isinstance(result, dict) and result.get("__interrupt__"):
             human_review_required = True
 
@@ -209,7 +186,6 @@ def start_research(request: ResearchRequest):
 
     except Exception as exc:
         execution_time = time.perf_counter() - start_time
-
         return {
             "thread_id": thread_id,
             "topic": topic,
@@ -231,7 +207,6 @@ def start_research(request: ResearchRequest):
 
 @app.post("/research/review")
 def review_research(request: ReviewRequest):
-
     decision = request.decision.strip().lower()
 
     if decision not in {"approve", "reject"}:
@@ -241,24 +216,13 @@ def review_research(request: ReviewRequest):
             "error": "Decision must be 'approve' or 'reject'.",
         }
 
-    config = {
-        "configurable": {
-            "thread_id": request.thread_id
-        }
-    }
-
+    config = {"configurable": {"thread_id": request.thread_id}}
     start_time = time.perf_counter()
 
     try:
-        result = graph.invoke(
-            Command(resume=decision),
-            config=config,
-        )
-
+        result = graph.invoke(Command(resume=decision), config=config)
         execution_time = time.perf_counter() - start_time
-
         state = get_state_from_graph(config)
-
         human_review_required = is_human_review_pending(config)
 
         if isinstance(result, dict) and result.get("__interrupt__"):
@@ -273,7 +237,6 @@ def review_research(request: ReviewRequest):
 
     except Exception as exc:
         execution_time = time.perf_counter() - start_time
-
         return {
             "thread_id": request.thread_id,
             "workflow_status": "backend_failed",
@@ -286,16 +249,10 @@ def review_research(request: ReviewRequest):
 
 @app.get("/research/{thread_id}")
 def get_research_state(thread_id: str):
-
-    config = {
-        "configurable": {
-            "thread_id": thread_id
-        }
-    }
+    config = {"configurable": {"thread_id": thread_id}}
 
     try:
         state = get_state_from_graph(config)
-
         human_review_required = is_human_review_pending(config)
 
         return build_response(
